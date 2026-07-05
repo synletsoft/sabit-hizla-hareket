@@ -2,7 +2,7 @@ const GAME_WIDTH = 1920;
 const GAME_HEIGHT = 1080;
 const DEFAULT_FRAME_COUNT = 241;
 
-const SIMULATION_TIME_SCALE = 0.55;
+const SIMULATION_TIME_SCALE = 1;
 const ROAD_SPEED_FACTOR = 18;
 const CAR_SPEED_FACTOR = 7.4;
 const MAX_ROAD_SPEED = 680;
@@ -13,14 +13,22 @@ const CAR_ACCELERATION_VISUAL_BOOST = 1.35;
 const MAX_ROAD_FRAME_STEP = 14;
 const MAX_CAR_FRAME_STEP = 5.5;
 const SLIDER_KNOB_EDGE_INSET = 8;
+const MAX_DURATION = 30;
+const MAX_INITIAL_SPEED = 20;
+const MAX_ACCELERATION = 5;
+const VELOCITY_SCALE_MAX = MAX_INITIAL_SPEED + MAX_ACCELERATION * MAX_DURATION;
+const POSITION_SCALE_MAX = MAX_INITIAL_SPEED * MAX_DURATION + 0.5 * MAX_ACCELERATION * MAX_DURATION * MAX_DURATION;
+const ACCELERATION_AXIS_MAX = 6;
+const VELOCITY_AXIS_MAX = 180;
+const POSITION_AXIS_MAX = 3000;
 const FRAME_MIN = 0;
 const FRAME_MAX = 240;
 const FRAME_COUNT = FRAME_MAX - FRAME_MIN + 1;
 
 const GRAPH_CONFIGS = [
-	{ key: "a", title: "İvme - Zaman (a-t)", axis: "İvme (m/s²)", color: "#13b778", fill: "rgba(57, 219, 165, 0.18)", accessor: point => point.a, areaLabel: "Hız Değişimini verir." },
-	{ key: "v", title: "Hız - Zaman (v-t)", axis: "Hız (m/s)", color: "#0098e5", fill: "rgba(89, 199, 245, 0.20)", accessor: point => point.v, areaLabel: "Yer Değiştirmeyi verir." },
-	{ key: "x", title: "Konum - Zaman (x-t)", axis: "Konum (m)", color: "#5347ff", fill: "rgba(111, 101, 255, 0.16)", accessor: point => point.x, areaLabel: "" }
+	{ key: "a", title: "İvme - Zaman (a-t)", axis: "İvme (m/s²)", color: "#13b778", fill: "rgba(57, 219, 165, 0.18)", accessor: point => point.a, areaLabel: "Hız Değişimini verir.", range: { min: -ACCELERATION_AXIS_MAX, max: ACCELERATION_AXIS_MAX } },
+	{ key: "v", title: "Hız - Zaman (v-t)", axis: "Hız (m/s)", color: "#0098e5", fill: "rgba(89, 199, 245, 0.20)", accessor: point => point.v, areaLabel: "Yer Değiştirmeyi verir.", range: { min: -VELOCITY_AXIS_MAX, max: VELOCITY_AXIS_MAX } },
+	{ key: "x", title: "Konum - Zaman (x-t)", axis: "Konum (m)", color: "#5347ff", fill: "rgba(111, 101, 255, 0.16)", accessor: point => point.x, areaLabel: "", range: { min: -POSITION_AXIS_MAX, max: POSITION_AXIS_MAX } }
 ];
 
 runOnStartup(runtime =>
@@ -61,6 +69,7 @@ class MotionSimulation
 		this.visualV = 3;
 		this.hasStoppedByDeceleration = false;
 		this.isRunning = false;
+		this.isPaused = false;
 		this.hasFinished = false;
 		this.data = [];
 		this.roadFrame = 0;
@@ -99,6 +108,9 @@ class MotionSimulation
 		this.outputs = {};
 		this.clearPanelTimers();
 		window.removeEventListener("resize", MotionSimulation.resizeHost);
+		window.removeEventListener("orientationchange", MotionSimulation.resizeHost);
+		window.visualViewport?.removeEventListener("resize", MotionSimulation.resizeHost);
+		window.visualViewport?.removeEventListener("scroll", MotionSimulation.resizeHost);
 		this.showOriginalUi();
 	}
 
@@ -204,7 +216,7 @@ class MotionSimulation
 			input.addEventListener("input", () => this.handleParamInput(input.dataset.param, Number(input.value)));
 		}
 
-		host.querySelector("[data-action='start']").addEventListener("click", () => this.start());
+		host.querySelector("[data-action='start']").addEventListener("click", () => this.handlePrimaryAction());
 		host.querySelector("[data-action='reset']").addEventListener("click", () => this.reset());
 		host.querySelector("[data-toggle-panel='graphs']").addEventListener("click", () => this.togglePanel("graphs"));
 		host.querySelector("[data-toggle-panel='params']").addEventListener("click", () => this.togglePanel("params"));
@@ -214,6 +226,9 @@ class MotionSimulation
 
 		MotionSimulation.resizeHost = () => resizeStage(host);
 		window.addEventListener("resize", MotionSimulation.resizeHost);
+		window.addEventListener("orientationchange", MotionSimulation.resizeHost);
+		window.visualViewport?.addEventListener("resize", MotionSimulation.resizeHost);
+		window.visualViewport?.addEventListener("scroll", MotionSimulation.resizeHost);
 		resizeStage(host);
 	}
 
@@ -243,6 +258,17 @@ class MotionSimulation
 		this.updateControls();
 	}
 
+	handlePrimaryAction()
+	{
+		if (this.isRunning)
+		{
+			this.pause();
+			return;
+		}
+
+		this.start();
+	}
+
 	start()
 	{
 		if (this.isRunning)
@@ -252,9 +278,21 @@ class MotionSimulation
 			this.reset(false);
 
 		this.isRunning = true;
+		this.isPaused = false;
 		this.hasFinished = false;
 		this.updateButtons();
 		this.scheduleRunPanels();
+	}
+
+	pause()
+	{
+		if (!this.isRunning)
+			return;
+
+		this.isRunning = false;
+		this.isPaused = true;
+		this.clearPanelTimers();
+		this.updateButtons();
 	}
 
 	reset(updateUi = true)
@@ -276,6 +314,7 @@ class MotionSimulation
 		this.visualV = this.v0;
 		this.hasStoppedByDeceleration = false;
 		this.isRunning = false;
+		this.isPaused = false;
 		this.hasFinished = false;
 		this.data = [{ t: 0, x: this.x, v: this.v, a: this.a }];
 		this.lastDrawTime = -1;
@@ -350,7 +389,7 @@ class MotionSimulation
 		const roadStep = Math.min(roadSpeed * dt, MAX_ROAD_FRAME_STEP);
 		const carStep = Math.min(carSpeed * dt, MAX_CAR_FRAME_STEP);
 		this.roadFrame = wrap(this.roadFrame - direction * roadStep, 0, this.roadFrameCount);
-		this.carFrame = wrap(this.carFrame + direction * carStep, 0, this.carFrameCount);
+		this.carFrame = wrap(this.carFrame - direction * carStep, 0, this.carFrameCount);
 
 		setSpriteFrame(this.objects.road, Math.floor(this.roadFrame));
 		setSpriteFrame(this.objects.car, Math.floor(this.carFrame));
@@ -429,6 +468,13 @@ class MotionSimulation
 			return;
 
 		button.classList.toggle("is-running", this.isRunning);
+		button.classList.toggle("is-paused", this.isPaused);
+		if (this.isRunning)
+			button.innerHTML = "<span>Ⅱ</span>Durdur";
+		else if (this.isPaused)
+			button.innerHTML = "<span>▷</span>Devam Et";
+		else
+			button.innerHTML = "<span>▷</span>Başlat";
 	}
 
 	updateScaleMarker()
@@ -440,9 +486,7 @@ class MotionSimulation
 		if (!marker)
 			return;
 
-		const finalX = this.x0 + this.v0 * this.duration + 0.5 * this.a * this.duration * this.duration;
-		const denominator = Math.max(1, Math.abs(finalX), Math.abs(this.x));
-		const normalized = clamp(0.5 + this.x / (denominator * 2), 0.05, 0.95);
+		const normalized = clamp(0.5 + this.x / (POSITION_SCALE_MAX * 2), 0.02, 0.98);
 		marker.style.left = `${normalized * 100}%`;
 	}
 
@@ -543,9 +587,8 @@ class MotionSimulation
 		const padBottom = 32;
 		const plotW = width - padLeft - padRight;
 		const plotH = height - padTop - padBottom;
-		const values = this.data.map(graph.accessor);
-		const domainMax = Math.max(1, this.duration);
-		const range = niceRange(values);
+		const domainMax = MAX_DURATION;
+		const range = graph.range;
 
 		ctx.clearRect(0, 0, width, height);
 		ctx.fillStyle = "#ffffff";
@@ -751,6 +794,17 @@ function requestFullscreen()
 
 function resizeStage(host)
 {
+	applyResizeStage(host);
+	window.requestAnimationFrame?.(() => applyResizeStage(host));
+	for (const delay of [80, 180, 360])
+		window.setTimeout(() => applyResizeStage(host), delay);
+}
+
+function applyResizeStage(host)
+{
+	if (!host || !document.body.contains(host))
+		return;
+
 	const canvas = Array.from(document.querySelectorAll("canvas"))
 		.find(item => !host.contains(item));
 	const rect = canvas?.getBoundingClientRect?.();
@@ -880,9 +934,9 @@ function injectStyles()
 		.top-tabs {
 			position: absolute;
 			z-index: 12;
-			left: 704px;
+			left: 622px;
 			top: 30px;
-			width: 586px;
+			width: 675px;
 			display: grid;
 			grid-template-columns: repeat(3, 1fr);
 			gap: 0;
@@ -890,8 +944,8 @@ function injectStyles()
 		}
 
 		.top-tabs button {
-			width: 196px;
-			height: 81px;
+			width: 225px;
+			height: 93px;
 			border: 0;
 			border-radius: 18px;
 			background: linear-gradient(#eef2f6, #cdd5de);
@@ -914,13 +968,13 @@ function injectStyles()
 
 		.top-tabs .tab-title {
 			display: block;
-			font: 900 23px/1 Calibri, Arial, sans-serif;
+			font: 900 26px/1 Calibri, Arial, sans-serif;
 		}
 
 		.top-tabs .tab-value {
 			display: block;
 			color: #1e3347;
-			font: 900 19px/1 Calibri, Arial, sans-serif;
+			font: 900 22px/1 Calibri, Arial, sans-serif;
 			white-space: nowrap;
 		}
 
@@ -1001,7 +1055,13 @@ function injectStyles()
 		}
 
 		.start-button.is-running {
-			filter: brightness(0.93);
+			background: #d93030;
+			filter: none;
+		}
+
+		.start-button.is-paused {
+			background: #f28c18;
+			filter: none;
 		}
 
 		.reset-button {
@@ -1181,8 +1241,8 @@ function injectStyles()
 
 function niceRange(values)
 {
-	let min = Math.min(0, ...values);
-	let max = Math.max(0, ...values);
+	let min = Math.floor(Math.min(0, ...values));
+	let max = Math.ceil(Math.max(0, ...values));
 
 	if (!Number.isFinite(min) || !Number.isFinite(max))
 	{
@@ -1190,18 +1250,19 @@ function niceRange(values)
 		max = 1;
 	}
 
-	if (Math.abs(max - min) < 0.001)
+	if (max === min)
 	{
-		const base = Math.max(1, Math.abs(max));
-		min -= base;
-		max += base;
+		min -= 1;
+		max += 1;
 	}
 
-	const padding = Math.max(0.5, (max - min) * 0.12);
-	return {
-		min: min - padding,
-		max: max + padding
-	};
+	const padding = Math.max(1, Math.ceil((max - min) * 0.12));
+	min = Math.floor(min - padding);
+	max = Math.ceil(max + padding);
+	const span = Math.max(4, max - min);
+	max = min + Math.ceil(span / 4) * 4;
+
+	return { min, max };
 }
 
 function areaEstimate(points, accessor)
@@ -1241,10 +1302,5 @@ function getDecelerationStopTime(v0, a)
 
 function trimNumber(value)
 {
-	const abs = Math.abs(value);
-	if (abs >= 100)
-		return value.toFixed(0);
-	if (abs >= 10)
-		return value.toFixed(1);
-	return value.toFixed(2);
+	return String(Math.round(value));
 }
