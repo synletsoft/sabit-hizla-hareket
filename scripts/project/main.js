@@ -1,17 +1,18 @@
 const GAME_WIDTH = 1920;
 const GAME_HEIGHT = 1080;
-const DEFAULT_FRAME_COUNT = 241;
 
 const SIMULATION_TIME_SCALE = 1;
-const ROAD_SPEED_FACTOR = 18;
-const CAR_SPEED_FACTOR = 7.4;
-const MAX_ROAD_SPEED = 680;
-const MAX_CAR_SPEED = 235;
+const ROAD_SPEED_FACTOR = 6.9;
+const CAR_SPEED_FACTOR = 1.25;
+const MAX_ROAD_SPEED = 260;
+const MAX_CAR_SPEED = 55;
 const STARTING_ROAD_VISUAL_SPEED = 0.75;
 const STARTING_CAR_VISUAL_SPEED = 1.1;
 const CAR_ACCELERATION_VISUAL_BOOST = 1.35;
-const MAX_ROAD_FRAME_STEP = 14;
-const MAX_CAR_FRAME_STEP = 5.5;
+const MAX_ROAD_FRAME_STEP = 6;
+const MAX_CAR_FRAME_STEP = 0.85;
+const ROAD_FRAME_COUNT = 81;
+const CAR_FRAME_COUNT = 61;
 const SLIDER_KNOB_EDGE_INSET = 8;
 const MAX_DURATION = 30;
 const MAX_INITIAL_SPEED = 20;
@@ -21,10 +22,6 @@ const POSITION_SCALE_MAX = MAX_INITIAL_SPEED * MAX_DURATION + 0.5 * MAX_ACCELERA
 const ACCELERATION_AXIS_MAX = 6;
 const VELOCITY_AXIS_MAX = 180;
 const POSITION_AXIS_MAX = 3000;
-const FRAME_MIN = 0;
-const FRAME_MAX = 240;
-const FRAME_COUNT = FRAME_MAX - FRAME_MIN + 1;
-
 const GRAPH_CONFIGS = [
 	{ key: "a", title: "İvme - Zaman (a-t)", axis: "İvme (m/s²)", color: "#13b778", fill: "rgba(57, 219, 165, 0.18)", accessor: point => point.a, areaLabel: "Hız Değişimini verir.", range: { min: -ACCELERATION_AXIS_MAX, max: ACCELERATION_AXIS_MAX } },
 	{ key: "v", title: "Hız - Zaman (v-t)", axis: "Hız (m/s)", color: "#0098e5", fill: "rgba(89, 199, 245, 0.20)", accessor: point => point.v, areaLabel: "Yer Değiştirmeyi verir.", range: { min: -VELOCITY_AXIS_MAX, max: VELOCITY_AXIS_MAX } },
@@ -74,8 +71,8 @@ class MotionSimulation
 		this.data = [];
 		this.roadFrame = 0;
 		this.carFrame = 0;
-		this.roadFrameCount = FRAME_COUNT;
-		this.carFrameCount = FRAME_COUNT;
+		this.roadFrameCount = ROAD_FRAME_COUNT;
+		this.carFrameCount = CAR_FRAME_COUNT;
 		this.lastDrawTime = -1;
 		this.objects = {};
 		this.panelTimers = [];
@@ -126,8 +123,8 @@ class MotionSimulation
 		this.objects.share = getFirst(this.runtime, "shareBtn");
 		this.objects.fullscreen = getFirst(this.runtime, "fullScreenBtn");
 
-		this.roadFrameCount = FRAME_COUNT;
-		this.carFrameCount = FRAME_COUNT;
+		this.roadFrameCount = getAnimationFrameCount(this.objects.road, ROAD_FRAME_COUNT);
+		this.carFrameCount = getAnimationFrameCount(this.objects.car, CAR_FRAME_COUNT);
 	}
 
 	hideOriginalUi()
