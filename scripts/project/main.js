@@ -79,6 +79,7 @@ class MotionSimulation
 		this.lastDrawTime = -1;
 		this.objects = {};
 		this.panelTimers = [];
+		this.lastLayoutSync = 0;
 	}
 
 	mount()
@@ -107,6 +108,7 @@ class MotionSimulation
 		this.controls = {};
 		this.outputs = {};
 		this.clearPanelTimers();
+		this.lastLayoutSync = 0;
 		window.removeEventListener("resize", MotionSimulation.resizeHost);
 		window.removeEventListener("orientationchange", MotionSimulation.resizeHost);
 		window.visualViewport?.removeEventListener("resize", MotionSimulation.resizeHost);
@@ -224,12 +226,12 @@ class MotionSimulation
 		for (const button of host.querySelectorAll("[data-focus-graph]"))
 			button.addEventListener("click", () => this.flashGraph(button.dataset.focusGraph));
 
-		MotionSimulation.resizeHost = () => resizeStage(host);
+		MotionSimulation.resizeHost = () => this.syncResponsiveLayout(true);
 		window.addEventListener("resize", MotionSimulation.resizeHost);
 		window.addEventListener("orientationchange", MotionSimulation.resizeHost);
 		window.visualViewport?.addEventListener("resize", MotionSimulation.resizeHost);
 		window.visualViewport?.addEventListener("scroll", MotionSimulation.resizeHost);
-		resizeStage(host);
+		this.syncResponsiveLayout(true);
 	}
 
 	createSliderTemplate(param, label, unit, min, max, step)
@@ -329,6 +331,8 @@ class MotionSimulation
 		if (!this.host)
 			return;
 
+		this.syncResponsiveLayout();
+
 		if (this.isRunning)
 		{
 			this.t = Math.min(this.duration, this.t + Math.max(0, dt) * SIMULATION_TIME_SCALE);
@@ -350,6 +354,57 @@ class MotionSimulation
 			this.drawGraphs();
 
 		this.updateButtons();
+	}
+
+	syncResponsiveLayout(force = false)
+	{
+		if (!this.host)
+			return;
+
+		const now = performance.now();
+		if (!force && now - this.lastLayoutSync < 120)
+			return;
+
+		this.lastLayoutSync = now;
+		applyResizeStage(this.host);
+		this.layoutNativeButtons();
+
+		if (!force)
+			return;
+
+		window.requestAnimationFrame?.(() =>
+		{
+			applyResizeStage(this.host);
+			this.layoutNativeButtons();
+		});
+
+		for (const delay of [80, 180, 360, 720, 1200])
+			window.setTimeout(() =>
+			{
+				applyResizeStage(this.host);
+				this.layoutNativeButtons();
+			}, delay);
+	}
+
+	layoutNativeButtons()
+	{
+		const buttons = [this.objects.refresh, this.objects.audio, this.objects.share, this.objects.fullscreen]
+			.filter(Boolean);
+
+		if (!buttons.length)
+			return;
+
+		const buttonSize = 78;
+		const gap = 24;
+		const right = 70;
+		const top = 73;
+		const startX = GAME_WIDTH - right - (buttons.length - 1) * (buttonSize + gap);
+
+		buttons.forEach((button, index) =>
+		{
+			setInstanceVisible(button, true);
+			setInstancePosition(button, startX + index * (buttonSize + gap), top);
+		});
 	}
 
 	updatePhysics()
@@ -771,6 +826,29 @@ function setInstanceVisible(instance, visible)
 	}
 }
 
+function setInstancePosition(instance, x, y)
+{
+	if (!instance)
+		return;
+
+	try
+	{
+		instance.x = x;
+		instance.y = y;
+	}
+	catch
+	{
+		try
+		{
+			instance.setPosition(x, y);
+		}
+		catch
+		{
+			// Position APIs vary between Construct runtime releases.
+		}
+	}
+}
+
 function getAnimationFrameCount(instance, fallback)
 {
 	if (!instance)
@@ -814,9 +892,7 @@ function applyResizeStage(host)
 	if (!host || !document.body.contains(host))
 		return;
 
-	const canvas = Array.from(document.querySelectorAll("canvas"))
-		.find(item => !host.contains(item));
-	const rect = canvas?.getBoundingClientRect?.();
+	const rect = getVisibleStageRect(host);
 
 	if (rect && rect.width > 0 && rect.height > 0)
 	{
@@ -831,6 +907,17 @@ function applyResizeStage(host)
 	host.style.left = "50%";
 	host.style.top = "50%";
 	host.style.transform = `translate(-50%, -50%) scale(${scale})`;
+}
+
+function getVisibleStageRect(host)
+{
+	const canvases = Array.from(document.querySelectorAll("canvas"))
+		.filter(item => !host.contains(item))
+		.map(item => item.getBoundingClientRect?.())
+		.filter(rect => rect && rect.width > 20 && rect.height > 20)
+		.sort((a, b) => b.width * b.height - a.width * a.height);
+
+	return canvases[0] || null;
 }
 
 function injectStyles()
