@@ -2,17 +2,18 @@ const GAME_WIDTH = 1920;
 const GAME_HEIGHT = 1080;
 
 const SIMULATION_TIME_SCALE = 1;
-const ROAD_SPEED_FACTOR = 6.9;
-const CAR_SPEED_FACTOR = 1.25;
-const MAX_ROAD_SPEED = 260;
-const MAX_CAR_SPEED = 55;
-const STARTING_ROAD_VISUAL_SPEED = 0.75;
-const STARTING_CAR_VISUAL_SPEED = 1.1;
-const CAR_ACCELERATION_VISUAL_BOOST = 1.35;
-const MAX_ROAD_FRAME_STEP = 6;
-const MAX_CAR_FRAME_STEP = 0.85;
-const ROAD_FRAME_COUNT = 81;
-const CAR_FRAME_COUNT = 61;
+const ROAD_SPEED_FACTOR = 16.5;
+const CAR_SPEED_FACTOR = 6.1;
+const MAX_ROAD_SPEED = 620;
+const MAX_CAR_SPEED = 205;
+const STARTING_ROAD_VISUAL_SPEED = 0.35;
+const STARTING_CAR_VISUAL_SPEED = 0.45;
+const CAR_ACCELERATION_VISUAL_BOOST = 0.7;
+const MAX_ROAD_FRAME_STEP = 11.5;
+const MAX_CAR_FRAME_STEP = 3.8;
+const ROAD_FRAME_COUNT = 241;
+const CAR_FRAME_COUNT = 241;
+const VISUAL_SPEED_RESPONSE = 4.2;
 const SLIDER_KNOB_EDGE_INSET = 8;
 const MAX_DURATION = 30;
 const MAX_INITIAL_SPEED = 20;
@@ -71,6 +72,8 @@ class MotionSimulation
 		this.data = [];
 		this.roadFrame = 0;
 		this.carFrame = 0;
+		this.roadVisualSpeed = 0;
+		this.carVisualSpeed = 0;
 		this.roadFrameCount = ROAD_FRAME_COUNT;
 		this.carFrameCount = CAR_FRAME_COUNT;
 		this.lastDrawTime = -1;
@@ -317,6 +320,8 @@ class MotionSimulation
 		this.lastDrawTime = -1;
 		this.roadFrame = 0;
 		this.carFrame = 0;
+		this.roadVisualSpeed = 0;
+		this.carVisualSpeed = 0;
 	}
 
 	update(dt)
@@ -372,15 +377,22 @@ class MotionSimulation
 		const startupCarSpeed = startsFromRest
 			? Math.max(STARTING_CAR_VISUAL_SPEED, Math.abs(this.a) * CAR_ACCELERATION_VISUAL_BOOST)
 			: 0;
-		const roadVisualSpeed = this.isRunning && hasPhysicalMotion ? Math.max(absV, startupRoadSpeed) : 0;
-		const carVisualSpeed = this.isRunning && hasPhysicalMotion ? Math.max(absV, startupCarSpeed) : 0;
-		let roadSpeed = clamp(roadVisualSpeed * ROAD_SPEED_FACTOR, 0, MAX_ROAD_SPEED);
-		let carSpeed = clamp(carVisualSpeed * CAR_SPEED_FACTOR, 0, MAX_CAR_SPEED);
+		const speedRatio = clamp(absV / VELOCITY_AXIS_MAX, 0, 1);
+		const easedSpeed = absV * (0.62 + 0.38 * smoothstep(speedRatio));
+		const targetRoadVisualSpeed = this.isRunning && hasPhysicalMotion ? Math.max(easedSpeed, startupRoadSpeed) : 0;
+		const targetCarVisualSpeed = this.isRunning && hasPhysicalMotion ? Math.max(easedSpeed, startupCarSpeed) : 0;
+		const response = 1 - Math.exp(-VISUAL_SPEED_RESPONSE * Math.max(0, dt));
+		this.roadVisualSpeed += (targetRoadVisualSpeed - this.roadVisualSpeed) * response;
+		this.carVisualSpeed += (targetCarVisualSpeed - this.carVisualSpeed) * response;
+		let roadSpeed = clamp(this.roadVisualSpeed * ROAD_SPEED_FACTOR, 0, MAX_ROAD_SPEED);
+		let carSpeed = clamp(this.carVisualSpeed * CAR_SPEED_FACTOR, 0, MAX_CAR_SPEED);
 
 		if (!this.isRunning || !hasPhysicalMotion)
 		{
 			roadSpeed = 0;
 			carSpeed = 0;
+			this.roadVisualSpeed = 0;
+			this.carVisualSpeed = 0;
 		}
 
 		const roadStep = Math.min(roadSpeed * dt, MAX_ROAD_FRAME_STEP);
@@ -578,8 +590,8 @@ class MotionSimulation
 
 		const width = canvas.width;
 		const height = canvas.height;
-		const padLeft = 38;
-		const padRight = 10;
+		const padLeft = 46;
+		const padRight = 8;
 		const padTop = 18;
 		const padBottom = 32;
 		const plotW = width - padLeft - padRight;
@@ -615,7 +627,7 @@ class MotionSimulation
 			ctx.stroke();
 
 			const yValue = range.max - (range.max - range.min) * i / 4;
-			ctx.fillText(trimNumber(yValue), padLeft - 7, y);
+			ctx.fillText(trimNumber(yValue), padLeft - 6, y);
 		}
 
 		ctx.setLineDash([]);
@@ -634,7 +646,7 @@ class MotionSimulation
 		ctx.fillText("Zaman (s)", padLeft + plotW / 2, height - 20);
 
 		ctx.save();
-		ctx.translate(10, padTop + plotH / 2);
+		ctx.translate(4, padTop + plotH / 2);
 		ctx.rotate(-Math.PI / 2);
 		ctx.fillText(graph.axis, 0, 0);
 		ctx.restore();
@@ -1286,6 +1298,12 @@ function wrap(value, min, max)
 {
 	const range = max - min;
 	return ((((value - min) % range) + range) % range) + min;
+}
+
+function smoothstep(value)
+{
+	const x = clamp(value, 0, 1);
+	return x * x * (3 - 2 * x);
 }
 
 function getDecelerationStopTime(v0, a)
